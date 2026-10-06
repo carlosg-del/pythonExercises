@@ -83,6 +83,72 @@ const tasks=[
 {q:"Final challenge: write a function called grade that accepts a mark and returns A for 80+, B for 70–79, C for 60–69 and F below 60. Use a loop to process the marks in the list and print each grade.",out:"A\nB\nC\nF",code:'def grade(mark):\n    if mark >= 80:\n        return "A"\n    elif mark >= 70:\n        return "B"\n    elif mark >= 60:\n        return "C"\n    else:\n        return "F"\n\nmarks = [85, 74, 63, 42]\nfor mark in marks:\n    print(grade(mark))',check:o=>o.trim()==="A\\nB\\nC\\nF"}
 ];
 
+// Hidden anti-print tests. These are deliberately NOT shown to students.
+// Input tasks are tested with different hidden values; fixed-output tasks also
+// require evidence of the programming construct named in the question.
+const hiddenTests = [
+  null,
+  [{input:[], expected:"Alex"}],
+  [{input:[], expected:"17"}],
+  [{input:["3"], expected:"30"},{input:["11"], expected:"110"},{input:["-2"], expected:"-20"}],
+  [{input:["Leo"], expected:"Hello, Leo!"},{input:["Sunway"], expected:"Hello, Sunway!"}],
+  [{input:["49"], expected:"Fail"},{input:["50"], expected:"Pass"},{input:["100"], expected:"Pass"}],
+  [{input:["9"], expected:"Positive"},{input:["0"], expected:"Zero"},{input:["-12"], expected:"Negative"}],
+  [{input:[], expected:"1\n2\n3\n4\n5"}],
+  [{input:[], expected:"55"}],
+  [{input:["11","1","12","13","2"], expected:"3"},{input:["10","10","10","10","10"], expected:"0"}],
+  [{input:[], expected:"Cn"}],
+  [{input:[], expected:"9"}],
+  [{input:[], expected:"COMPUTER SCIENCE"}],
+  [{input:[], expected:"30"}],
+  [{input:[], expected:"87"}],
+  [{input:[], expected:"150"}],
+  [{input:[], expected:"18"}],
+  [{input:[], expected:"True"}],
+  [{input:[], expected:"1\n2\n3\n4\n5\n6"}],
+  [{input:[], expected:"A\nB\nC\nF"}]
+];
+
+function normaliseCode(c){
+ return c.replace(/#[^\n]*/g,"").replace(/\s+/g," ").trim().toLowerCase();
+}
+function hasAny(code, parts){return parts.some(x=>code.includes(x));}
+function sourceLooksGenuine(index, raw){
+ const c=normaliseCode(raw);
+ if(!c) return false;
+ // Task 1 is intentionally a simple print task: a print-only solution is the correct solution.
+ if(index===0) return /print\s*\(\s*["\']hello sunway international school["\']\s*\)/.test(c);
+ // Reject the obvious cheat: printing the visible answer without implementing the task.
+ const literalOnly = c.replace(/print\s*\([^)]*\)/g,"").trim();
+ if(literalOnly==="") return false;
+ const requirements=[
+   [],
+   ["name", "print"],
+   ["print", "+"],
+   ["input", "*"],
+   ["input", "hello", "+"],
+   ["input", "if", "else"],
+   ["input", "if", "elif"],
+   ["for", "range"],
+   ["for", "total"],
+   ["input", "for", "count", "if"],
+   ["computer", "[0]", "[-1]"],
+   ["len", "word"],
+   ["upper", "text"],
+   ["[10, 20, 30, 40]", "[2]"],
+   ["marks", "max("],
+   ["for", "total", "numbers"],
+   ["def double", "return", "double("],
+   ["def is_even", "return", "% 2", "is_even("],
+   ["grid", "for row", "for value"],
+   ["def grade", "return \"a\"", "return \"b\"", "return \"c\"", "return \"f\"", "for mark"]
+ ];
+ return requirements[index].every(x=>c.includes(x));
+}
+
+function hiddenExpected(index, caseIndex){return hiddenTests[index]?.[caseIndex]?.expected ?? tasks[index].out;}
+
+
 let n=0,pyodide=null,running=false;
 let score=0,taskScored=false,revealUsedForTask=false;
 function updateScore(){document.getElementById("score").textContent=score;}
@@ -100,12 +166,13 @@ function loadTask(){
  revealedCode.style.display="none";revealedCode.textContent="";revealBtn.textContent="Hold to reveal Python";
  feedback.className="feedback muted";feedback.textContent="Type your Python and click Run Python.";
 }
-async function executePython(){
+async function executePython(testInput=null){
  if(!pyodide){feedback.textContent="Python is still loading...";return null}
  if(running)return null;
- running=true;output.textContent="Running...";
+ running=true;
+ if(testInput===null) output.textContent="Running...";
  try{
-  const vals=input.value.split(",").map(x=>x.trim());
+  const vals=(testInput===null ? input.value : testInput.join(",")).split(",").map(x=>x.trim());
   const code=editor.value;
   const prelude=`import sys, json, io
 __trace_inputs=json.loads(${JSON.stringify(JSON.stringify(vals))})
@@ -120,18 +187,42 @@ def input(prompt=""):
 `;
   await pyodide.runPythonAsync(prelude+"\nsys.stdout=io.StringIO()\n"+code);
   const out=pyodide.runPython("sys.stdout.getvalue()");
-  output.textContent=out;return out;
- }catch(err){output.textContent=String(err);return null}
- finally{running=false}
+  if(testInput===null) output.textContent=out;
+  return out;
+ }catch(err){
+  if(testInput===null) output.textContent=String(err);
+  return null;
+ }finally{running=false}
 }
+
 async function checkCode(){
  if(!editor.value.trim()){feedback.className="feedback bad";feedback.textContent="✗ Enter some Python first.";return}
- const out=await executePython();
- if(out===null){feedback.className="feedback bad";feedback.textContent="✗ Your program produced an error.";return}
- if(tasks[n].check(out)){awardPoints();feedback.className="feedback good";feedback.textContent=`✓ Correct. +${revealUsedForTask?1:3} points`;if(n<tasks.length-1)setTimeout(()=>{n++;loadTask()},650);else feedback.textContent=`✓ All 20 tasks completed! Score: ${score}/60`}
- else{feedback.className="feedback bad";feedback.textContent="✗ Not quite. Compare your output with the target."}
+ if(!sourceLooksGenuine(n, editor.value)){
+  feedback.className="feedback bad";
+  feedback.textContent="✗ Your code does not yet implement the required Python technique. Printing the target output is not enough.";
+  return;
+ }
+ // First run the student's visible test.
+ const visibleOut=await executePython();
+ if(visibleOut===null){feedback.className="feedback bad";feedback.textContent="✗ Your program produced an error.";return}
+ // Then run hidden cases that are never displayed in the page.
+ const cases=hiddenTests[n] || [{input:[],expected:tasks[n].out}];
+ for(let i=0;i<cases.length;i++){
+  const out=await executePython(cases[i].input);
+  if(out===null || out.trim()!==hiddenExpected(n,i)){
+   feedback.className="feedback bad";
+   feedback.textContent="✗ Your program failed a hidden test. Try making the solution work generally rather than matching the displayed answer.";
+   return;
+  }
+ }
+ awardPoints();
+ feedback.className="feedback good";
+ feedback.textContent=`✓ Correct. +${revealUsedForTask?1:3} points`;
+ if(n<tasks.length-1)setTimeout(()=>{n++;loadTask()},650);
+ else feedback.textContent=`✓ All 20 tasks completed! Score: ${score}/60`;
 }
-document.querySelector(".run").onclick=executePython;
+
+document.querySelector(".run").onclick=()=>executePython();
 document.querySelector(".check").onclick=checkCode;
 document.getElementById("resetBtn").onclick=()=>{editor.value="";output.textContent="";feedback.className="feedback muted";feedback.textContent="Type your Python and click Run Python."};
 
